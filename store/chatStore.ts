@@ -1,7 +1,7 @@
-import { create } from "zustand";
-import { supabase, getOrCreateUserId, isDemoMode } from "@/lib/supabase";
-import type { ConnectionStatus, Message, MatchResult } from "@/types/chat";
+import { getOrCreateUserId, isDemoMode, supabase } from "@/lib/supabase";
+import type { ConnectionStatus, MatchResult, Message } from "@/types/chat";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { create } from "zustand";
 
 // Profanity filter - basic word list
 const BLOCKED_WORDS = [
@@ -28,7 +28,7 @@ interface ChatState {
   interests: string[];
   skipCount: number;
   skipCooldownUntil: number | null;
-  
+
   // Reply state
   replyingTo: ReplyTarget | null;
 
@@ -44,21 +44,44 @@ interface ChatState {
   disconnect: () => Promise<void>;
   setTyping: (isTyping: boolean) => void;
   reportUser: (reason: string) => Promise<void>;
-  reset: () => void;
-  
+  reset: () => Promise<void>;
+
   // Reply actions
   setReplyingTo: (message: Message | null) => void;
   clearReply: () => void;
-  
+
   // Message status actions
   markMessageAsRead: (messageId: string) => void;
 }
 
-const generateRoomId = () => `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+const generateRoomId = () =>
+  `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 const containsProfanity = (text: string): boolean => {
   const lowerText = text.toLowerCase();
   return BLOCKED_WORDS.some((word) => lowerText.includes(word.toLowerCase()));
+};
+
+// Helper to wait for channel subscription with timeout
+const waitForSubscription = (
+  channel: RealtimeChannel,
+  timeoutMs: number = 5000
+): Promise<boolean> => {
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      resolve(false);
+    }, timeoutMs);
+
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        clearTimeout(timeout);
+        resolve(true);
+      } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+        clearTimeout(timeout);
+        resolve(false);
+      }
+    });
+  });
 };
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -99,10 +122,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Clean up any existing channels
     if (state.roomChannel) {
-      await supabase.removeChannel(state.roomChannel);
+      try {
+        await supabase.removeChannel(state.roomChannel);
+      } catch (e) {
+        console.log("Error removing room channel:", e);
+      }
     }
     if (state.matchChannel) {
-      await supabase.removeChannel(state.matchChannel);
+      try {
+        await supabase.removeChannel(state.matchChannel);
+      } catch (e) {
+        console.log("Error removing match channel:", e);
+      }
     }
 
     set({
@@ -117,8 +148,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Helper function to simulate a match for demo purposes
     async function simulateMatch() {
-      // Simulate search delay (2-5 seconds)
-      const delay = 2000 + Math.random() * 3000;
+      // Simulate search delay (2-4 seconds for faster demo)
+      const delay = 2000 + Math.random() * 2000;
       await new Promise((resolve) => setTimeout(resolve, delay));
 
       if (get().status === "searching") {
@@ -129,23 +160,45 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
 
     // Helper function to handle when a match is found
-    function handleMatch(matchData: MatchResult) {
+    async function handleMatch(matchData: MatchResult) {
       const { roomId, partnerId } = matchData;
+
+      // CRITICAL: Check if we're still in searching state
+      // If user pressed home or disconnected, don't connect
+      const currentState = get();
+      if (currentState.status !== "searching") {
+        console.log("Match received but no longer searching, ignoring");
+        return;
+      }
+
+      // Prevent self-matching
+      if (partnerId === currentState.userId) {
+        console.warn("Prevented self-match");
+        return;
+      }
 
       // Subscribe to the room channel for messaging (only if not in demo mode)
       let roomChannel: RealtimeChannel | null = null;
-      
+
       if (!isDemoMode) {
-        roomChannel = supabase.channel(`room:${roomId}`);
+        roomChannel = supabase.channel(`room:${roomId}`, {
+          config: {
+            broadcast: { self: false },
+          },
+        });
 
         roomChannel
           .on("broadcast", { event: "message" }, (payload) => {
-            const msg = payload.payload as { 
-              text: string; 
+            const state = get();
+            // Only process if we're connected and in the right room
+            if (state.status !== "connected" || state.roomId !== roomId) return;
+
+            const msg = payload.payload as {
+              text: string;
               senderId: string;
               replyTo?: { id: string; text: string; sender: "me" | "stranger" };
             };
-            if (msg.senderId !== get().userId) {
+            if (msg.senderId !== state.userId) {
               const newMessage: Message = {
                 id: `${Date.now()}_${Math.random()}`,
                 text: msg.text,
@@ -153,45 +206,67 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 timestamp: Date.now(),
                 replyTo: msg.replyTo,
               };
-              set((state) => ({
-                messages: [...state.messages, newMessage],
+              set((s) => ({
+                messages: [...s.messages, newMessage],
                 strangerTyping: false,
               }));
             }
           })
           .on("broadcast", { event: "typing" }, (payload) => {
+            const state = get();
+            if (state.status !== "connected" || state.roomId !== roomId) return;
+
             const { senderId, isTyping } = payload.payload as {
               senderId: string;
               isTyping: boolean;
             };
-            if (senderId !== get().userId) {
+            if (senderId !== state.userId) {
               set({ strangerTyping: isTyping });
             }
           })
           .on("broadcast", { event: "disconnect" }, (payload) => {
+            const state = get();
+            if (state.roomId !== roomId) return;
+
             const { senderId } = payload.payload as { senderId: string };
-            if (senderId !== get().userId) {
+            if (senderId !== state.userId) {
               set({ status: "disconnected", strangerTyping: false });
             }
           })
           .on("broadcast", { event: "read_receipt" }, (payload) => {
-            const { messageId, readerId } = payload.payload as {
+            const state = get();
+            if (state.status !== "connected" || state.roomId !== roomId) return;
+
+            const { readerId } = payload.payload as {
               messageId: string;
               readerId: string;
             };
-            // If someone else read a message, mark all our sent messages as read
-            // This means "the other person has seen my messages"
-            if (readerId !== get().userId) {
-              set((state) => ({
-                messages: state.messages.map((m) =>
-                  m.sender === "me" && (m.status === "sent" || m.status === "sending")
+            if (readerId !== state.userId) {
+              set((s) => ({
+                messages: s.messages.map((m) =>
+                  m.sender === "me" &&
+                  (m.status === "sent" || m.status === "sending")
                     ? { ...m, status: "read" as const }
                     : m
                 ),
               }));
             }
-          })
-          .subscribe();
+          });
+
+        // Wait for subscription to complete
+        const subscribed = await waitForSubscription(roomChannel, 5000);
+        if (!subscribed) {
+          console.warn("Room channel subscription failed, continuing anyway");
+        }
+      }
+
+      // Final check before connecting - state might have changed during subscription
+      if (get().status !== "searching") {
+        console.log("State changed during room subscription, aborting");
+        if (roomChannel) {
+          supabase.removeChannel(roomChannel);
+        }
+        return;
       }
 
       set({
@@ -208,23 +283,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    // Create a unique channel for this user to receive match notifications
-    const userChannel = `match_${userId}`;
+    // Create a unique channel ID for this user
+    const userChannel = `match_${userId}_${Date.now()}`;
+    let pollIntervalId: ReturnType<typeof setInterval> | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    // Subscribe to match notifications first
-    const matchChannel = supabase.channel(userChannel);
-
-    matchChannel
-      .on("broadcast", { event: "matched" }, (payload) => {
-        const matchData = payload.payload as MatchResult;
-        handleMatch(matchData);
-      })
-      .subscribe();
-
-    set({ matchChannel });
+    // Helper to clean up polling
+    const cleanupPolling = () => {
+      if (pollIntervalId) {
+        clearInterval(pollIntervalId);
+        pollIntervalId = null;
+      }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
 
     try {
-      // Check if there's anyone in the queue (with matching interests if provided)
+      // STEP 1: Check if there's anyone in the queue to match with
       let query = supabase
         .from("waiting_queue")
         .select("*")
@@ -232,7 +309,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
         .order("created_at", { ascending: true })
         .limit(1);
 
-      // If we have interests, try to match on those first
       if (interests.length > 0) {
         query = query.overlaps("interests", interests);
       }
@@ -241,71 +317,174 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
       if (error) {
         console.error("Error checking queue:", error);
-        // For MVP/demo: simulate a match after delay
         await simulateMatch();
         return;
       }
 
-      if (waitingUsers && waitingUsers.length > 0) {
-        // Found a match! Remove them from queue and connect
-        const partner = waitingUsers[0];
-
-        // Delete partner from queue
-        await supabase.from("waiting_queue").delete().eq("id", partner.id);
-
-        // Generate room ID
+      // Helper to attempt matching with a partner
+      const attemptMatch = async (partner: {
+        id: string;
+        user_id: string;
+        socket_channel_id: string;
+      }): Promise<boolean> => {
         const roomId = generateRoomId();
 
-        // Notify the partner about the match
-        await supabase.channel(partner.socket_channel_id).send({
-          type: "broadcast",
-          event: "matched",
-          payload: { roomId, partnerId: userId } as MatchResult,
-        });
+        // Atomically delete the partner from queue (claim them)
+        const { data: deletedRows, error: deleteError } = await supabase
+          .from("waiting_queue")
+          .delete()
+          .eq("id", partner.id)
+          .select();
+
+        if (deleteError || !deletedRows || deletedRows.length === 0) {
+          console.log("Partner already claimed:", partner.user_id);
+          return false;
+        }
+
+        // Record the match in active_rooms for the partner to find via polling
+        const { error: roomError } = await supabase
+          .from("active_rooms")
+          .insert({
+            room_id: roomId,
+            user1_id: userId,
+            user2_id: partner.user_id,
+          });
+
+        if (roomError) {
+          console.warn("Failed to create room record:", roomError);
+          // Continue anyway - realtime notification might work
+        }
+
+        // Best-effort realtime notification (non-blocking)
+        try {
+          const partnerChannel = supabase.channel(partner.socket_channel_id);
+          partnerChannel.subscribe(async (status) => {
+            if (status === "SUBSCRIBED") {
+              await partnerChannel.send({
+                type: "broadcast",
+                event: "matched",
+                payload: { roomId, partnerId: userId } as MatchResult,
+              });
+              setTimeout(() => supabase.removeChannel(partnerChannel), 1000);
+            }
+          });
+        } catch (e) {
+          console.log("Realtime notification failed (partner will poll):", e);
+        }
 
         // Handle our side of the match
-        handleMatch({ roomId, partnerId: partner.user_id });
-      } else {
-        // No match found, add ourselves to queue
-        // If interests match failed, try without interests
-        if (interests.length > 0) {
-          const { data: anyUsers } = await supabase
-            .from("waiting_queue")
-            .select("*")
-            .neq("user_id", userId)
-            .order("created_at", { ascending: true })
-            .limit(1);
+        await handleMatch({ roomId, partnerId: partner.user_id });
+        return true;
+      };
 
-          if (anyUsers && anyUsers.length > 0) {
-            const partner = anyUsers[0];
-            await supabase.from("waiting_queue").delete().eq("id", partner.id);
-            const roomId = generateRoomId();
-            await supabase.channel(partner.socket_channel_id).send({
-              type: "broadcast",
-              event: "matched",
-              payload: { roomId, partnerId: userId } as MatchResult,
-            });
-            handleMatch({ roomId, partnerId: partner.user_id });
+      // Try to match with someone already in queue
+      if (waitingUsers && waitingUsers.length > 0) {
+        if (await attemptMatch(waitingUsers[0])) {
+          return;
+        }
+      }
+
+      // Try without interests filter if we had interests
+      if (interests.length > 0) {
+        const { data: anyUsers, error: anyError } = await supabase
+          .from("waiting_queue")
+          .select("*")
+          .neq("user_id", userId)
+          .order("created_at", { ascending: true })
+          .limit(1);
+
+        if (!anyError && anyUsers && anyUsers.length > 0) {
+          if (await attemptMatch(anyUsers[0])) {
             return;
           }
         }
+      }
 
-        // No one available, join queue and wait
-        const { error: insertError } = await supabase.from("waiting_queue").insert({
+      // STEP 2: No match found - join queue and wait for someone to find us
+      const { error: insertError } = await supabase
+        .from("waiting_queue")
+        .insert({
           user_id: userId,
           socket_channel_id: userChannel,
           interests: interests,
         });
 
-        if (insertError) {
-          console.error("Error joining queue:", insertError);
-          // For MVP: simulate a match
+      if (insertError) {
+        console.error("Error joining queue:", insertError);
+        await simulateMatch();
+        return;
+      }
+
+      console.log("Joined queue, waiting for match...");
+
+      // Set up realtime listener (best effort, not required)
+      const matchChannel = supabase.channel(userChannel, {
+        config: { broadcast: { self: false } },
+      });
+
+      matchChannel.on("broadcast", { event: "matched" }, (payload) => {
+        if (get().status !== "searching") return;
+        cleanupPolling();
+        const matchData = payload.payload as MatchResult;
+        console.log("Matched via realtime:", matchData.roomId);
+        handleMatch(matchData);
+      });
+
+      // Don't wait for subscription - just start it
+      matchChannel.subscribe((status) => {
+        console.log("Match channel status:", status);
+      });
+      set({ matchChannel });
+
+      // STEP 3: Poll active_rooms for our match (reliable fallback)
+      // This catches matches when realtime fails
+      pollIntervalId = setInterval(async () => {
+        if (get().status !== "searching") {
+          cleanupPolling();
+          return;
+        }
+
+        try {
+          // Check if we've been matched (we'd be user2 in the room)
+          const { data: room } = await supabase
+            .from("active_rooms")
+            .select("room_id, user1_id")
+            .eq("user2_id", userId)
+            .is("ended_at", null)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .single();
+
+          if (room) {
+            console.log("Found match via polling:", room.room_id);
+            cleanupPolling();
+
+            // Remove ourselves from queue if still there
+            await supabase.from("waiting_queue").delete().eq("user_id", userId);
+
+            // Handle the match
+            await handleMatch({
+              roomId: room.room_id,
+              partnerId: room.user1_id,
+            });
+          }
+        } catch (e) {
+          // Single row not found is expected, ignore
+        }
+      }, 1500); // Poll every 1.5 seconds
+
+      // Timeout after 60 seconds
+      timeoutId = setTimeout(async () => {
+        cleanupPolling();
+        if (get().status === "searching") {
+          console.log("Match timeout after 60s");
+          await supabase.from("waiting_queue").delete().eq("user_id", userId);
           await simulateMatch();
         }
-      }
+      }, 60000);
     } catch (err) {
       console.error("Error in findMatch:", err);
-      // For MVP: simulate a match
+      cleanupPolling();
       await simulateMatch();
     }
   },
@@ -320,7 +499,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     // Check for profanity
     if (containsProfanity(text)) {
-      return { success: false, error: "Message contains inappropriate content" };
+      return {
+        success: false,
+        error: "Message contains inappropriate content",
+      };
     }
 
     const trimmedText = text.trim();
@@ -335,11 +517,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sender: "me",
       timestamp: Date.now(),
       status: "sending",
-      replyTo: replyingTo ? {
-        id: replyingTo.id,
-        text: replyingTo.text,
-        sender: replyingTo.sender,
-      } : undefined,
+      replyTo: replyingTo
+        ? {
+            id: replyingTo.id,
+            text: replyingTo.text,
+            sender: replyingTo.sender,
+          }
+        : undefined,
     };
 
     set((state) => ({
@@ -349,19 +533,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }));
 
     // Broadcast to room
-    roomChannel?.send({
-      type: "broadcast",
-      event: "message",
-      payload: { 
-        text: trimmedText, 
-        senderId: userId,
-        replyTo: replyingTo ? {
-          id: replyingTo.id,
-          text: replyingTo.text,
-          sender: replyingTo.sender === "me" ? "stranger" : "me", // Flip for receiver
-        } : undefined,
-      },
-    });
+    if (roomChannel) {
+      roomChannel.send({
+        type: "broadcast",
+        event: "message",
+        payload: {
+          text: trimmedText,
+          senderId: userId,
+          replyTo: replyingTo
+            ? {
+                id: replyingTo.id,
+                text: replyingTo.text,
+                sender: replyingTo.sender === "me" ? "stranger" : "me", // Flip for receiver
+              }
+            : undefined,
+        },
+      });
+    }
 
     // Mark as sent after a short delay (simulating network confirmation)
     setTimeout(() => {
@@ -377,7 +565,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   disconnect: async () => {
     const state = get();
-    const { roomChannel, matchChannel, userId, skipCount } = state;
+    const { roomChannel, matchChannel, userId, roomId, skipCount } = state;
 
     // Track skips for rate limiting
     const newSkipCount = skipCount + 1;
@@ -397,8 +585,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
           payload: { senderId: userId },
         });
         await supabase.removeChannel(roomChannel);
-      } catch {
-        // Ignore errors in demo mode
+      } catch (e) {
+        console.log("Error during disconnect:", e);
+      }
+    }
+
+    // Mark room as ended in database
+    if (!isDemoMode && roomId) {
+      try {
+        await supabase
+          .from("active_rooms")
+          .update({ ended_at: new Date().toISOString() })
+          .eq("room_id", roomId);
+      } catch (e) {
+        console.log("Error marking room as ended:", e);
       }
     }
 
@@ -406,8 +606,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!isDemoMode) {
       try {
         await supabase.from("waiting_queue").delete().eq("user_id", userId);
-      } catch {
-        // Ignore errors
+      } catch (e) {
+        console.log("Error removing from queue:", e);
       }
     }
 
@@ -415,8 +615,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (matchChannel) {
       try {
         await supabase.removeChannel(matchChannel);
-      } catch {
-        // Ignore errors in demo mode
+      } catch (e) {
+        console.log("Error removing match channel:", e);
       }
     }
 
@@ -446,11 +646,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set({ isTyping });
 
-    roomChannel?.send({
-      type: "broadcast",
-      event: "typing",
-      payload: { senderId: userId, isTyping },
-    });
+    if (roomChannel) {
+      roomChannel.send({
+        type: "broadcast",
+        event: "typing",
+        payload: { senderId: userId, isTyping },
+      });
+    }
   },
 
   reportUser: async (reason: string) => {
@@ -471,8 +673,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
           reason,
           chat_log_snapshot: chatSnapshot,
         });
-      } catch {
-        // Ignore errors in demo mode
+      } catch (e) {
+        console.log("Error submitting report:", e);
       }
     }
 
@@ -480,7 +682,62 @@ export const useChatStore = create<ChatState>((set, get) => ({
     await get().disconnect();
   },
 
-  reset: () => {
+  reset: async () => {
+    const state = get();
+    const { roomChannel, matchChannel, userId, roomId, status } = state;
+
+    // Notify partner of disconnect if we're connected
+    if (roomChannel && (status === "connected" || status === "disconnected")) {
+      try {
+        await roomChannel.send({
+          type: "broadcast",
+          event: "disconnect",
+          payload: { senderId: userId },
+        });
+      } catch (e) {
+        console.log("Error sending disconnect notification during reset:", e);
+      }
+    }
+
+    // Clean up room channel
+    if (roomChannel) {
+      try {
+        await supabase.removeChannel(roomChannel);
+      } catch (e) {
+        console.log("Error removing room channel during reset:", e);
+      }
+    }
+
+    // Clean up match channel
+    if (matchChannel) {
+      try {
+        await supabase.removeChannel(matchChannel);
+      } catch (e) {
+        console.log("Error removing match channel during reset:", e);
+      }
+    }
+
+    // Mark room as ended
+    if (!isDemoMode && roomId) {
+      try {
+        await supabase
+          .from("active_rooms")
+          .update({ ended_at: new Date().toISOString() })
+          .eq("room_id", roomId);
+      } catch (e) {
+        console.log("Error marking room as ended during reset:", e);
+      }
+    }
+
+    // Remove from queue if still there
+    if (!isDemoMode && userId) {
+      try {
+        await supabase.from("waiting_queue").delete().eq("user_id", userId);
+      } catch (e) {
+        console.log("Error removing from queue during reset:", e);
+      }
+    }
+
     set({
       status: "idle",
       messages: [],
@@ -491,6 +748,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
       skipCount: 0,
       skipCooldownUntil: null,
       replyingTo: null,
+      roomChannel: null,
+      matchChannel: null,
     });
   },
 
@@ -522,10 +781,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return; // Only mark stranger messages as read
     }
 
-    // Check if we already sent a read receipt for this message
-    // (We can track this by checking if message has a special flag, or just send it)
-    // For now, we'll send it every time - Supabase will handle deduplication
-
     // Notify sender that their message was read
     if (roomChannel) {
       try {
@@ -540,4 +795,3 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 }));
-

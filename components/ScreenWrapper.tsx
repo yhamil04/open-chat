@@ -6,14 +6,17 @@ interface ScreenWrapperProps {
   children: React.ReactNode;
 }
 
+const COLORS = {
+  background: "#050508",
+};
+
 export function ScreenWrapper({ children }: ScreenWrapperProps) {
-  // Use SafeAreaView for native, regular View for web
   const Container = Platform.OS === "web" ? View : SafeAreaView;
 
   return (
-    <Container style={styles.container} className="flex-1 bg-dark-bg">
+    <Container style={styles.container}>
       {Platform.OS === "android" && (
-        <StatusBar backgroundColor="#0a0a0f" barStyle="light-content" />
+        <StatusBar backgroundColor={COLORS.background} barStyle="light-content" />
       )}
       {children}
     </Container>
@@ -23,7 +26,6 @@ export function ScreenWrapper({ children }: ScreenWrapperProps) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0a0a0f",
+    backgroundColor: COLORS.background,
   },
 });
-

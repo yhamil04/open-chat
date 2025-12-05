@@ -16,6 +16,43 @@ const supabaseAnonKey =
 // Flag to check if we're in demo mode (no real Supabase connection)
 export const isDemoMode = supabaseUrl.includes("placeholder");
 
+// Cross-platform UUID generator
+const generateUUID = (): string => {
+  // Try native crypto.randomUUID first (web)
+  if (
+    Platform.OS === "web" &&
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+
+  // Fallback: Generate UUID v4 manually (works on all platforms)
+  const getRandomValues = (arr: Uint8Array): Uint8Array => {
+    if (
+      typeof crypto !== "undefined" &&
+      typeof crypto.getRandomValues === "function"
+    ) {
+      return crypto.getRandomValues(arr);
+    }
+    // Fallback for environments without crypto
+    for (let i = 0; i < arr.length; i++) {
+      arr[i] = Math.floor(Math.random() * 256);
+    }
+    return arr;
+  };
+
+  const bytes = getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // Version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // Variant 10
+
+  const hex = Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+};
+
 // For web, we use localStorage; for native, we'd use SecureStore
 const getStorage = () => {
   if (Platform.OS === "web") {
@@ -69,17 +106,22 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+// In-memory storage for native user ID (persists for app session)
+let nativeUserId: string | null = null;
+
 // Generate or retrieve the anonymous user ID
 export const getOrCreateUserId = (): string => {
   if (Platform.OS === "web" && typeof window !== "undefined") {
     const storedId = window.localStorage.getItem("openchat_user_id");
     if (storedId) return storedId;
 
-    const newId = crypto.randomUUID();
+    const newId = generateUUID();
     window.localStorage.setItem("openchat_user_id", newId);
     return newId;
   }
 
-  // For native, generate a new ID each time (in production, use SecureStore)
-  return crypto.randomUUID();
+  // For native, keep consistent ID during app session
+  if (nativeUserId) return nativeUserId;
+  nativeUserId = generateUUID();
+  return nativeUserId;
 };

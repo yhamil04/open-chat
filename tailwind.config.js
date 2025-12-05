@@ -5,27 +5,29 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Dark theme colors
+        // Refined dark theme - Midnight aesthetic
         dark: {
-          bg: "#0a0a0f",
-          surface: "#12121a",
-          border: "#1e1e2e",
-          muted: "#6b7280",
+          bg: "#050508",
+          surface: "#0c0c12",
+          elevated: "#141420",
+          border: "#1f1f2e",
+          muted: "#64648b",
         },
         accent: {
-          primary: "#6366f1",
-          secondary: "#a78bfa",
-          success: "#10b981",
-          warning: "#f59e0b",
-          danger: "#ef4444",
+          primary: "#7c5cff",
+          secondary: "#b794f6",
+          glow: "#9d7aff",
+          success: "#22c55e",
+          warning: "#fbbf24",
+          danger: "#f43f5e",
         },
         chat: {
-          me: "#6366f1",
-          stranger: "#1e1e2e",
+          me: "#7c5cff",
+          stranger: "#1a1a28",
         },
       },
       fontFamily: {
-        sans: ["JetBrains Mono", "monospace"],
+        sans: ["system-ui", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
       },
     },
   },

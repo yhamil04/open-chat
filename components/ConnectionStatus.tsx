@@ -1,11 +1,26 @@
 import type { ConnectionStatus as StatusType } from "@/types/chat";
-import React from "react";
-import { StyleSheet, Text, View } from "react-native";
+import React, { useEffect, useRef } from "react";
+import { Animated, StyleSheet, Text, View } from "react-native";
 
 interface ConnectionStatusProps {
   status: StatusType;
   strangerTyping?: boolean;
 }
+
+// Modern color palette
+const COLORS = {
+  background: "#0c0c12",
+  border: "#1f1f2e",
+  idle: "#4a4a6a",
+  searching: "#fbbf24",
+  searchingBg: "rgba(251, 191, 36, 0.08)",
+  connected: "#22c55e",
+  connectedBg: "rgba(34, 197, 94, 0.08)",
+  disconnected: "#f43f5e",
+  disconnectedBg: "rgba(244, 63, 94, 0.08)",
+  text: "#ffffff",
+  textMuted: "#64648b",
+};
 
 const STATUS_CONFIG: Record<
   StatusType,
@@ -13,24 +28,24 @@ const STATUS_CONFIG: Record<
 > = {
   idle: {
     text: "Ready to connect",
-    color: "#6b7280",
-    bgColor: "#1e1e2e",
+    color: COLORS.idle,
+    bgColor: "transparent",
   },
   searching: {
-    text: "Looking for someone...",
-    color: "#f59e0b",
-    bgColor: "#422006",
+    text: "Finding someone...",
+    color: COLORS.searching,
+    bgColor: COLORS.searchingBg,
     pulse: true,
   },
   connected: {
-    text: "Connected with a stranger",
-    color: "#10b981",
-    bgColor: "#052e16",
+    text: "Connected",
+    color: COLORS.connected,
+    bgColor: COLORS.connectedBg,
   },
   disconnected: {
-    text: "Stranger has disconnected",
-    color: "#ef4444",
-    bgColor: "#450a0a",
+    text: "Disconnected",
+    color: COLORS.disconnected,
+    bgColor: COLORS.disconnectedBg,
   },
 };
 
@@ -39,73 +54,158 @@ export function ConnectionStatus({
   strangerTyping,
 }: ConnectionStatusProps) {
   const config = STATUS_CONFIG[status];
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (config.pulse) {
+      const animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 0.4,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      animation.start();
+      return () => animation.stop();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [config.pulse, pulseAnim]);
 
   return (
-    <View
-      style={styles.container}
-      className="px-4 py-2 bg-dark-surface border-b border-dark-border"
-    >
-      <View style={styles.statusRow} className="flex-row items-center">
-        <View
+    <View style={[styles.container, { backgroundColor: config.bgColor }]}>
+      <View style={styles.statusRow}>
+        <Animated.View
           style={[
             styles.indicator,
-            { backgroundColor: config.color },
-            config.pulse && styles.pulseIndicator,
+            { backgroundColor: config.color, opacity: pulseAnim },
           ]}
-          className="w-2.5 h-2.5 rounded-full mr-2"
         />
-        <Text
-          style={[styles.statusText, { color: config.color }]}
-          className="text-sm font-medium"
-        >
+        <Text style={[styles.statusText, { color: config.color }]}>
           {config.text}
         </Text>
       </View>
       {strangerTyping && status === "connected" && (
-        <View style={styles.typingContainer} className="mt-1">
-          <Text
-            style={styles.typingText}
-            className="text-xs text-dark-muted italic"
-          >
-            Stranger is typing...
-          </Text>
+        <View style={styles.typingContainer}>
+          <Text style={styles.typingText}>typing</Text>
+          <TypingDots />
         </View>
       )}
     </View>
   );
 }
 
+function TypingDots() {
+  const dot1 = useRef(new Animated.Value(0)).current;
+  const dot2 = useRef(new Animated.Value(0)).current;
+  const dot3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const createDotAnimation = (dotAnim: Animated.Value, delay: number) => {
+      return Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(dotAnim, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+          Animated.timing(dotAnim, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+          Animated.delay(600 - delay),
+        ])
+      );
+    };
+
+    const anim1 = createDotAnimation(dot1, 0);
+    const anim2 = createDotAnimation(dot2, 200);
+    const anim3 = createDotAnimation(dot3, 400);
+
+    anim1.start();
+    anim2.start();
+    anim3.start();
+
+    return () => {
+      anim1.stop();
+      anim2.stop();
+      anim3.stop();
+    };
+  }, [dot1, dot2, dot3]);
+
+  const dotStyle = (anim: Animated.Value) => ({
+    opacity: anim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.3, 1],
+    }),
+    transform: [
+      {
+        translateY: anim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0, -2],
+        }),
+      },
+    ],
+  });
+
+  return (
+    <View style={styles.dotsContainer}>
+      <Animated.Text style={[styles.dot, dotStyle(dot1)]}>•</Animated.Text>
+      <Animated.Text style={[styles.dot, dotStyle(dot2)]}>•</Animated.Text>
+      <Animated.Text style={[styles.dot, dotStyle(dot3)]}>•</Animated.Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: "#12121a",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: "#1e1e2e",
+    borderBottomColor: COLORS.border,
   },
   statusRow: {
     flexDirection: "row",
     alignItems: "center",
   },
   indicator: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
-  },
-  pulseIndicator: {
-    // Animation would be handled with Animated API for more complex effects
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 10,
   },
   statusText: {
-    fontSize: 14,
-    fontWeight: "500",
+    fontSize: 13,
+    fontWeight: "600",
+    letterSpacing: 0.3,
   },
   typingContainer: {
-    marginTop: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    marginLeft: 18,
   },
   typingText: {
     fontSize: 12,
-    color: "#6b7280",
+    color: COLORS.textMuted,
     fontStyle: "italic",
+  },
+  dotsContainer: {
+    flexDirection: "row",
+    marginLeft: 2,
+  },
+  dot: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    marginHorizontal: 1,
   },
 });

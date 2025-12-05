@@ -18,6 +18,19 @@ interface ChatBubbleProps {
 
 const SWIPE_THRESHOLD = 60;
 
+// Modern color palette
+const COLORS = {
+  myBubble: "#7c5cff",
+  myBubbleGlow: "rgba(124, 92, 255, 0.15)",
+  strangerBubble: "#1a1a28",
+  strangerBubbleBorder: "#252536",
+  text: "#ffffff",
+  textMuted: "rgba(255, 255, 255, 0.5)",
+  timestamp: "rgba(255, 255, 255, 0.4)",
+  read: "#22c55e",
+  replyIndicator: "#7c5cff",
+};
+
 export function ChatBubble({ message, onReply }: ChatBubbleProps) {
   const isMe = message.sender === "me";
   const translateX = useSharedValue(0);
@@ -34,7 +47,6 @@ export function ChatBubble({ message, onReply }: ChatBubbleProps) {
   const panGesture = Gesture.Pan()
     .activeOffsetX([-20, 20])
     .onUpdate((event) => {
-      // Allow swipe right for stranger messages, left for my messages
       if (isMe) {
         translateX.value = Math.min(
           0,
@@ -68,14 +80,12 @@ export function ChatBubble({ message, onReply }: ChatBubbleProps) {
       }
     });
 
-  // Combine gestures
   const composedGesture = Gesture.Simultaneous(panGesture, longPressGesture);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: translateX.value }],
   }));
 
-  // Reply indicator style
   const replyIndicatorStyle = useAnimatedStyle(() => {
     const opacity = Math.abs(translateX.value) / SWIPE_THRESHOLD;
     return {
@@ -84,13 +94,12 @@ export function ChatBubble({ message, onReply }: ChatBubbleProps) {
     };
   });
 
-  // Markdown styles based on sender
   const markdownStyles = useMemo(
     () =>
       StyleSheet.create({
         body: {
-          color: "#fff",
-          fontSize: 16,
+          color: COLORS.text,
+          fontSize: 15,
           lineHeight: 22,
         },
         paragraph: {
@@ -98,58 +107,58 @@ export function ChatBubble({ message, onReply }: ChatBubbleProps) {
           marginBottom: 0,
         },
         strong: {
-          fontWeight: "bold",
-          color: "#fff",
+          fontWeight: "700",
+          color: COLORS.text,
         },
         em: {
           fontStyle: "italic",
-          color: "#fff",
+          color: COLORS.text,
         },
         code_inline: {
           backgroundColor: isMe
-            ? "rgba(255,255,255,0.2)"
-            : "rgba(255,255,255,0.1)",
-          color: "#fff",
+            ? "rgba(255,255,255,0.15)"
+            : "rgba(255,255,255,0.08)",
+          color: COLORS.text,
           paddingHorizontal: 6,
           paddingVertical: 2,
           borderRadius: 4,
           fontFamily: "monospace",
-          fontSize: 14,
+          fontSize: 13,
         },
         fence: {
-          backgroundColor: isMe ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.3)",
-          color: "#fff",
+          backgroundColor: isMe ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.25)",
+          color: COLORS.text,
           padding: 12,
           borderRadius: 8,
           fontFamily: "monospace",
-          fontSize: 13,
+          fontSize: 12,
           marginVertical: 4,
           overflow: "hidden",
         },
         code_block: {
-          backgroundColor: isMe ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.3)",
-          color: "#fff",
+          backgroundColor: isMe ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.25)",
+          color: COLORS.text,
           padding: 12,
           borderRadius: 8,
           fontFamily: "monospace",
-          fontSize: 13,
+          fontSize: 12,
         },
         link: {
-          color: isMe ? "#c7d2fe" : "#a78bfa",
+          color: isMe ? "#c7d2fe" : "#b794f6",
           textDecorationLine: "underline",
         },
         blockquote: {
           backgroundColor: isMe
-            ? "rgba(255,255,255,0.1)"
-            : "rgba(255,255,255,0.05)",
-          borderLeftColor: isMe ? "#c7d2fe" : "#6366f1",
+            ? "rgba(255,255,255,0.08)"
+            : "rgba(255,255,255,0.04)",
+          borderLeftColor: isMe ? "#c7d2fe" : "#7c5cff",
           borderLeftWidth: 3,
           paddingLeft: 12,
           paddingVertical: 4,
           marginVertical: 4,
         },
         list_item: {
-          color: "#fff",
+          color: COLORS.text,
           marginBottom: 4,
         },
         bullet_list: {
@@ -162,12 +171,11 @@ export function ChatBubble({ message, onReply }: ChatBubbleProps) {
     [isMe]
   );
 
-  // Status indicator for sent messages
   const renderStatus = () => {
     if (!isMe || !message.status) return null;
 
     let statusIcon = "";
-    let statusColor = "rgba(255,255,255,0.5)";
+    let statusColor = COLORS.textMuted;
 
     switch (message.status) {
       case "sending":
@@ -175,11 +183,11 @@ export function ChatBubble({ message, onReply }: ChatBubbleProps) {
         break;
       case "sent":
         statusIcon = "✓";
-        statusColor = "rgba(255,255,255,0.7)";
+        statusColor = COLORS.timestamp;
         break;
       case "read":
         statusIcon = "✓✓";
-        statusColor = "#10b981";
+        statusColor = COLORS.read;
         break;
     }
 
@@ -192,7 +200,7 @@ export function ChatBubble({ message, onReply }: ChatBubbleProps) {
 
   return (
     <View style={styles.bubbleWrapper}>
-      {/* Reply indicator - left side for stranger, right side for me */}
+      {/* Reply indicator */}
       <Animated.View
         style={[
           styles.replyIndicator,
@@ -207,14 +215,9 @@ export function ChatBubble({ message, onReply }: ChatBubbleProps) {
         <Animated.View style={animatedStyle}>
           <View
             style={[
-              styles.container,
-              isMe ? styles.containerMe : styles.containerStranger,
+              styles.bubble,
+              isMe ? styles.bubbleMe : styles.bubbleStranger,
             ]}
-            className={`max-w-[80%] px-4 py-3 rounded-2xl mb-2 ${
-              isMe
-                ? "self-end bg-accent-primary rounded-br-md"
-                : "self-start bg-dark-border rounded-bl-md"
-            }`}
           >
             {/* Reply Quote */}
             {message.replyTo && (
@@ -236,10 +239,7 @@ export function ChatBubble({ message, onReply }: ChatBubbleProps) {
             <Markdown style={markdownStyles}>{message.text}</Markdown>
 
             <View style={styles.footer}>
-              <Text
-                style={styles.timestamp}
-                className="text-xs opacity-60 text-gray-400"
-              >
+              <Text style={styles.timestamp}>
                 {formatTime(message.timestamp)}
               </Text>
               {renderStatus()}
@@ -259,86 +259,93 @@ function formatTime(timestamp: number): string {
 const styles = StyleSheet.create({
   bubbleWrapper: {
     position: "relative",
-    marginBottom: 8,
+    marginBottom: 6,
+    paddingHorizontal: 4,
   },
-  container: {
-    maxWidth: "80%",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 16,
+  bubble: {
+    maxWidth: "78%",
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 8,
+    borderRadius: 20,
   },
-  containerMe: {
+  bubbleMe: {
     alignSelf: "flex-end",
-    backgroundColor: "#6366f1",
-    borderBottomRightRadius: 4,
+    backgroundColor: COLORS.myBubble,
+    borderBottomRightRadius: 6,
+    shadowColor: COLORS.myBubble,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
   },
-  containerStranger: {
+  bubbleStranger: {
     alignSelf: "flex-start",
-    backgroundColor: "#1e1e2e",
-    borderBottomLeftRadius: 4,
+    backgroundColor: COLORS.strangerBubble,
+    borderBottomLeftRadius: 6,
+    borderWidth: 1,
+    borderColor: COLORS.strangerBubbleBorder,
   },
   replyIndicator: {
     position: "absolute",
     top: "50%",
-    marginTop: -16,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#6366f1",
+    marginTop: -14,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.replyIndicator,
     alignItems: "center",
     justifyContent: "center",
     zIndex: -1,
   },
   replyIndicatorLeft: {
-    left: -40,
+    left: -36,
   },
   replyIndicatorRight: {
-    right: -40,
+    right: -36,
   },
   replyIndicatorIcon: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
+    color: COLORS.text,
+    fontSize: 16,
+    fontWeight: "600",
   },
   replyQuote: {
-    borderLeftWidth: 3,
+    borderLeftWidth: 2,
     paddingLeft: 8,
     paddingVertical: 4,
     marginBottom: 8,
     borderRadius: 4,
   },
   replyQuoteMe: {
-    borderLeftColor: "rgba(255,255,255,0.5)",
-    backgroundColor: "rgba(255,255,255,0.1)",
+    borderLeftColor: "rgba(255,255,255,0.4)",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   replyQuoteStranger: {
-    borderLeftColor: "#6366f1",
-    backgroundColor: "rgba(99,102,241,0.1)",
+    borderLeftColor: COLORS.myBubble,
+    backgroundColor: "rgba(124, 92, 255, 0.08)",
   },
   replyLabel: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
-    color: "rgba(255,255,255,0.7)",
+    color: "rgba(255,255,255,0.6)",
     marginBottom: 2,
   },
   replyText: {
-    fontSize: 13,
-    color: "rgba(255,255,255,0.6)",
+    fontSize: 12,
+    color: "rgba(255,255,255,0.5)",
   },
   footer: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
     marginTop: 4,
-    gap: 6,
+    gap: 4,
   },
   timestamp: {
-    fontSize: 11,
-    opacity: 0.6,
-    color: "rgba(255,255,255,0.6)",
+    fontSize: 10,
+    color: COLORS.timestamp,
+    letterSpacing: 0.2,
   },
   statusIcon: {
-    fontSize: 12,
-    marginLeft: 4,
+    fontSize: 11,
   },
 });

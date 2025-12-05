@@ -14,12 +14,29 @@ interface InterestsInputProps {
   disabled?: boolean;
 }
 
+// Modern color palette
+const COLORS = {
+  background: "#050508",
+  surface: "#0c0c12",
+  input: "#0f0f18",
+  inputBorder: "#1f1f2e",
+  inputBorderFocus: "#7c5cff",
+  text: "#ffffff",
+  textMuted: "#64648b",
+  placeholder: "#4a4a6a",
+  accent: "#7c5cff",
+  tag: "#1a1a28",
+  tagBorder: "#252536",
+  tagText: "#b794f6",
+};
+
 export function InterestsInput({
   interests,
   onInterestsChange,
   disabled,
 }: InterestsInputProps) {
   const [inputValue, setInputValue] = useState("");
+  const [isFocused, setIsFocused] = useState(false);
 
   const addInterest = () => {
     const trimmed = inputValue.trim().toLowerCase();
@@ -39,32 +56,48 @@ export function InterestsInput({
     }
   };
 
+  const canAdd = inputValue.trim() && !disabled && interests.length < 5;
+
   return (
-    <View style={styles.container} className="mb-4">
-      <Text style={styles.label} className="text-dark-muted text-sm mb-2">
-        Add interests to find like-minded people (optional)
+    <View style={styles.container}>
+      <Text style={styles.label}>
+        Interests <Text style={styles.labelHint}>(optional)</Text>
       </Text>
-      <View style={styles.inputRow} className="flex-row items-center">
-        <TextInput
-          style={[styles.input, disabled && styles.inputDisabled]}
-          className="flex-1 bg-dark-surface text-white px-4 py-2.5 rounded-xl text-sm border border-dark-border"
-          placeholder="e.g., music, gaming, art..."
-          placeholderTextColor="#6b7280"
-          value={inputValue}
-          onChangeText={setInputValue}
-          onSubmitEditing={addInterest}
-          onKeyPress={handleKeyPress}
-          editable={!disabled}
-          maxLength={30}
-        />
-        <TouchableOpacity
-          style={[styles.addButton, disabled && styles.addButtonDisabled]}
-          className="ml-2 px-4 py-2.5 bg-accent-primary rounded-xl"
-          onPress={addInterest}
-          disabled={disabled || !inputValue.trim()}
+      <View style={styles.inputRow}>
+        <View
+          style={[
+            styles.inputWrapper,
+            isFocused && styles.inputWrapperFocused,
+            disabled && styles.inputWrapperDisabled,
+          ]}
         >
-          <Text style={styles.addButtonText} className="text-white font-medium">
-            Add
+          <TextInput
+            style={styles.input}
+            placeholder="music, gaming, art..."
+            placeholderTextColor={COLORS.placeholder}
+            value={inputValue}
+            onChangeText={setInputValue}
+            onSubmitEditing={addInterest}
+            onKeyPress={handleKeyPress}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
+            editable={!disabled}
+            maxLength={30}
+          />
+        </View>
+        <TouchableOpacity
+          style={[styles.addButton, !canAdd && styles.addButtonDisabled]}
+          onPress={addInterest}
+          disabled={!canAdd}
+          activeOpacity={0.8}
+        >
+          <Text
+            style={[
+              styles.addButtonText,
+              !canAdd && styles.addButtonTextDisabled,
+            ]}
+          >
+            +
           </Text>
         </TouchableOpacity>
       </View>
@@ -74,30 +107,28 @@ export function InterestsInput({
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.tagsContainer}
-          className="mt-3"
+          contentContainerStyle={styles.tagsContent}
         >
           {interests.map((interest) => (
             <TouchableOpacity
               key={interest}
               style={styles.tag}
-              className="flex-row items-center bg-dark-border px-3 py-1.5 rounded-full mr-2"
               onPress={() => !disabled && removeInterest(interest)}
               disabled={disabled}
+              activeOpacity={0.7}
             >
-              <Text style={styles.tagText} className="text-white text-sm mr-1">
-                {interest}
-              </Text>
-              {!disabled && (
-                <Text
-                  style={styles.tagRemove}
-                  className="text-dark-muted text-sm"
-                >
-                  ×
-                </Text>
-              )}
+              <Text style={styles.tagText}>{interest}</Text>
+              {!disabled && <Text style={styles.tagRemove}>×</Text>}
             </TouchableOpacity>
           ))}
         </ScrollView>
+      )}
+
+      {interests.length > 0 && (
+        <Text style={styles.hint}>
+          {5 - interests.length} more{" "}
+          {5 - interests.length === 1 ? "interest" : "interests"} allowed
+        </Text>
       )}
     </View>
   );
@@ -105,64 +136,102 @@ export function InterestsInput({
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   label: {
-    color: "#6b7280",
+    color: COLORS.text,
     fontSize: 14,
-    marginBottom: 8,
+    fontWeight: "600",
+    marginBottom: 10,
+  },
+  labelHint: {
+    color: COLORS.textMuted,
+    fontWeight: "400",
   },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 10,
+  },
+  inputWrapper: {
+    flex: 1,
+    backgroundColor: COLORS.input,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.inputBorder,
+  },
+  inputWrapperFocused: {
+    borderColor: COLORS.inputBorderFocus,
+    shadowColor: COLORS.accent,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+  },
+  inputWrapperDisabled: {
+    opacity: 0.5,
   },
   input: {
-    flex: 1,
-    backgroundColor: "#12121a",
-    color: "#fff",
+    color: COLORS.text,
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingVertical: 12,
     fontSize: 14,
-    borderWidth: 1,
-    borderColor: "#1e1e2e",
-  },
-  inputDisabled: {
-    opacity: 0.5,
   },
   addButton: {
-    marginLeft: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: "#6366f1",
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: COLORS.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: COLORS.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
   addButtonDisabled: {
-    opacity: 0.5,
+    backgroundColor: COLORS.tag,
+    shadowOpacity: 0,
   },
   addButtonText: {
-    color: "#fff",
+    color: COLORS.text,
+    fontSize: 22,
     fontWeight: "500",
   },
+  addButtonTextDisabled: {
+    color: COLORS.placeholder,
+  },
   tagsContainer: {
-    marginTop: 12,
+    marginTop: 14,
+  },
+  tagsContent: {
+    gap: 8,
   },
   tag: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#1e1e2e",
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    backgroundColor: COLORS.tag,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.tagBorder,
     marginRight: 8,
   },
   tagText: {
-    color: "#fff",
-    fontSize: 14,
-    marginRight: 4,
+    color: COLORS.tagText,
+    fontSize: 13,
+    fontWeight: "500",
   },
   tagRemove: {
-    color: "#6b7280",
+    color: COLORS.textMuted,
     fontSize: 16,
+    marginLeft: 6,
+    fontWeight: "400",
+  },
+  hint: {
+    color: COLORS.textMuted,
+    fontSize: 11,
+    marginTop: 10,
+    marginLeft: 2,
   },
 });
